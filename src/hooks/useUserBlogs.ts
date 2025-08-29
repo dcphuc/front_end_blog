@@ -13,39 +13,49 @@ export function useUserBlogs() {
             if (!account?.address) return [];
 
             try {
-                // Get objects owned by the current user
-                const ownedObjects = await client.getOwnedObjects({
-                    owner: account.address,
-                    filter: {
-                        StructType: `${CONTRACT_ADDRESS}::Blog`,
+                // Query for BlogPublished events to get all blogs
+                const events = await client.queryEvents({
+                    query: {
+                        MoveEventType: `${CONTRACT_ADDRESS}::BlogPublished`,
                     },
-                    options: {
-                        showContent: true,
-                        showType: true,
-                    },
+                    limit: 50,
+                    order: "descending",
                 });
 
                 const blogs: Blog[] = [];
 
-                for (const obj of ownedObjects.data) {
-                    if (obj.data?.content && obj.data.content.dataType === "moveObject") {
-                        try {
-                            const fields = (obj.data.content as any).fields;
-                            blogs.push({
-                                id: obj.data.objectId,
-                                author: fields.author,
-                                content: fields.content,
-                                likes: parseInt(fields.likes),
-                            });
-                        } catch (error) {
-                            console.error("Error processing user blog:", error);
+                // For each event, get the current state of the blog object
+                for (const event of events.data) {
+                    try {
+                        const eventData = event.parsedJson as any;
+                        const blogId = eventData.blog_id;
+
+                        // Get the current state of the blog object
+                        const blogObject = await client.getObject({
+                            id: blogId,
+                            options: { showContent: true },
+                        });
+
+                        if (blogObject.data?.content && blogObject.data.content.dataType === "moveObject") {
+                            const fields = (blogObject.data.content as any).fields;
+                            if (fields.author == account.address)
+                                blogs.push({
+                                    id: blogId,
+                                    author: fields.author,
+                                    content: fields.content,
+                                    likes: parseInt(fields.likes),
+                                });
                         }
+                    } catch (error) {
+                        console.error("Error processing blog event:", error);
+                        // Continue with next blog
                     }
                 }
 
                 return blogs;
             } catch (error) {
-                console.error("Error fetching user blogs:", error);
+                console.error("Error fetching blogs:", error);
+                // Return empty array on error
                 return [];
             }
         },
